@@ -46,6 +46,7 @@ INSTALLED_APPS = [
 
     #installed apps
     'accounts',
+    'appointments',
 ]
 
 MIDDLEWARE = [
