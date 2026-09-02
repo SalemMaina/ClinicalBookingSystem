@@ -86,3 +86,21 @@ class CancelAppointmentView(APIView):
             appointment.slot.save()
 
         return Response(AppointmentSerializer(appointment).data, status=status.HTTP_200_OK)
+
+class MyScheduleView(generics.ListAPIView):
+    """Doctor-facing view: shows the authenticated doctor's own booked appointments."""
+    serializer_class = AppointmentSerializer
+    permission_classes = [permissions.IsAuthenticated]
+
+    def list(self, request, *args, **kwargs):
+        if request.user.role != request.user.Role.DOCTOR:
+            return Response(
+                {"detail": "Only doctors can view their schedule."},
+                status=status.HTTP_403_FORBIDDEN,
+            )
+        return super().list(request, *args, **kwargs)
+
+    def get_queryset(self):
+        return Appointment.objects.filter(
+            slot__doctor=self.request.user
+        ).exclude(status=Appointment.Status.CANCELLED)
