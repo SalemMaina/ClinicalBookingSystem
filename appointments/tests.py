@@ -191,3 +191,55 @@ class CancelAppointmentTests(AppointmentsTestBase):
         response = self.client.post(url)
 
         self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+
+class MyScheduleTests(AppointmentsTestBase):
+    def setUp(self):
+        super().setUp()
+        # Doctor's own booked appointment
+        self.own_appointment = Appointment.objects.create(slot=self.future_slot, patient=self.patient)
+        self.future_slot.is_booked = True
+        self.future_slot.save()
+
+        # A cancelled appointment for the same doctor — should be excluded
+        cancelled_slot = Slot.objects.create(
+            doctor=self.doctor, datetime=timezone.now() + timedelta(days=3)
+        )
+        self.cancelled_appointment = Appointment.objects.create(
+            slot=cancelled_slot, patient=self.other_patient, status=Appointment.Status.CANCELLED
+        )
+
+        # Another doctor's appointment — should never show up for self.doctor
+        other_doctor = User.objects.create_user(
+            username="doc2", password="testpass123", role=User.Role.DOCTOR,
+        )
+        other_doctor_slot = Slot.objects.create(
+            doctor=other_doctor, datetime=timezone.now() + timedelta(days=1)
+        )
+        self.other_doctor_appointment = Appointment.objects.create(
+            slot=other_doctor_slot, patient=self.patient
+        )
+
+    def test_doctor_sees_only_their_own_active_appointments(self):
+        self._auth("doc1")
+        url = reverse("my-schedule")
+        response = self.client.get(url)
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        returned_ids = {a["id"] for a in response.data}
+
+        self.assertIn(self.own_appointment.id, returned_ids)
+        self.assertNotIn(self.cancelled_appointment.id, returned_ids)
+        self.assertNotIn(self.other_doctor_appointment.id, returned_ids)
+
+    def test_patient_cannot_view_doctor_schedule(self):
+        self._auth("patient1")
+        url = reverse("my-schedule")
+        response = self.client.get(url)
+
+        self.assertEqual(response.status_code, status.HTTP_403_FORBIDDEN)
+
+    def test_anonymous_cannot_view_doctor_schedule(self):
+        url = reverse("my-schedule")
+        response = self.client.get(url)
+
+        self.assertIn(response.status_code, (status.HTTP_401_UNAUTHORIZED, status.HTTP_403_FORBIDDEN))
