@@ -30,3 +30,13 @@ class BookAppointmentSerializer(serializers.Serializer):
                 "This slot is not available (already booked, in the past, or within the 1-hour buffer)."
             )
         return value
+
+class RescheduleAppointmentSerializer(serializers.Serializer):
+    new_slot_id = serializers.IntegerField()
+
+    def validate_new_slot_id(self, value):
+        if not Slot.objects.available().filter(id=value).exists():
+            raise serializers.ValidationError(
+                "The new slot is not available (already booked, in the past, or within the 1-hour buffer)."
+            )
+        return value

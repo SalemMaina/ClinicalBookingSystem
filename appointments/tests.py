@@ -243,3 +243,84 @@ class MyScheduleTests(AppointmentsTestBase):
         response = self.client.get(url)
 
         self.assertIn(response.status_code, (status.HTTP_401_UNAUTHORIZED, status.HTTP_403_FORBIDDEN))
+
+class RescheduleAppointmentTests(AppointmentsTestBase):
+    def setUp(self):
+        super().setUp()
+        self.appointment = Appointment.objects.create(slot=self.future_slot, patient=self.patient)
+        self.future_slot.is_booked = True
+        self.future_slot.save()
+
+        # A fresh, available slot to reschedule into
+        self.new_slot = Slot.objects.create(
+            doctor=self.doctor, datetime=timezone.now() + timedelta(days=2)
+        )
+
+    def test_patient_can_reschedule_to_available_slot(self):
+        self._auth("patient1")
+        url = reverse("reschedule-appointment", kwargs={"pk": self.appointment.id})
+        response = self.client.patch(url, {"new_slot_id": self.new_slot.id})
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+
+        self.appointment.refresh_from_db()
+        self.future_slot.refresh_from_db()
+        self.new_slot.refresh_from_db()
+
+        self.assertEqual(self.appointment.slot, self.new_slot)
+        self.assertFalse(self.future_slot.is_booked)  # old slot freed
+        self.assertTrue(self.new_slot.is_booked)       # new slot locked
+
+    def test_cannot_reschedule_cancelled_appointment(self):
+        self.appointment.status = Appointment.Status.CANCELLED
+        self.appointment.save()
+
+        self._auth("patient1")
+        url = reverse("reschedule-appointment", kwargs={"pk": self.appointment.id})
+        response = self.client.patch(url, {"new_slot_id": self.new_slot.id})
+
+        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+
+    def test_cannot_reschedule_to_already_booked_slot(self):
+        other_appointment_slot = self.new_slot
+        Appointment.objects.create(slot=other_appointment_slot, patient=self.other_patient)
+        other_appointment_slot.is_booked = True
+        other_appointment_slot.save()
+
+        self._auth("patient1")
+        url = reverse("reschedule-appointment", kwargs={"pk": self.appointment.id})
+        response = self.client.patch(url, {"new_slot_id": other_appointment_slot.id})
+
+        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+
+        # Original appointment must be unaffected
+        self.appointment.refresh_from_db()
+        self.assertEqual(self.appointment.slot, self.future_slot)
+
+    def test_cannot_reschedule_to_slot_within_buffer(self):
+        self._auth("patient1")
+        url = reverse("reschedule-appointment", kwargs={"pk": self.appointment.id})
+        response = self.client.patch(url, {"new_slot_id": self.buffered_slot.id})
+
+        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+
+    def test_cannot_reschedule_to_past_slot(self):
+        self._auth("patient1")
+        url = reverse("reschedule-appointment", kwargs={"pk": self.appointment.id})
+        response = self.client.patch(url, {"new_slot_id": self.past_slot.id})
+
+        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+
+    def test_cannot_reschedule_someone_elses_appointment(self):
+        self._auth("patient2")
+        url = reverse("reschedule-appointment", kwargs={"pk": self.appointment.id})
+        response = self.client.patch(url, {"new_slot_id": self.new_slot.id})
+
+        self.assertEqual(response.status_code, status.HTTP_404_NOT_FOUND)
+
+    def test_reschedule_to_nonexistent_slot_returns_error(self):
+        self._auth("patient1")
+        url = reverse("reschedule-appointment", kwargs={"pk": self.appointment.id})
+        response = self.client.patch(url, {"new_slot_id": 99999})
+
+        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
