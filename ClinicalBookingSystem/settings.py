@@ -10,6 +10,7 @@ For the full list of settings and their values, see
 https://docs.djangoproject.com/en/6.1/ref/settings/
 """
 import os
+import sys
 from datetime import timedelta
 from dotenv import load_dotenv
     
@@ -77,6 +78,9 @@ TEMPLATES = [
         },
     },
 ]
+
+if 'test' in sys.argv:
+    PASSWORD_HASHERS = ['django.contrib.auth.hashers.MD5PasswordHasher']
 
 WSGI_APPLICATION = 'ClinicalBookingSystem.wsgi.application'
 
