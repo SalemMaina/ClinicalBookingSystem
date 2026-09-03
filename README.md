@@ -1,4 +1,4 @@
-# Clinic Booking System — Backend Developer Take-Home Assessment
+# Clinic Booking System
 
 **Live application:** https://clinicalbookingsystem.onrender.com
 **Repository:** https://github.com/SalemMaina/ClinicalBookingSystem
