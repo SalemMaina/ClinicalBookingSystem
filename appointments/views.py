@@ -4,7 +4,7 @@ from rest_framework.response import Response
 from rest_framework.views import APIView
 
 from .models import Slot, Appointment
-from .serializers import SlotSerializer, AppointmentSerializer, BookAppointmentSerializer
+from .serializers import SlotSerializer, AppointmentSerializer, BookAppointmentSerializer, RescheduleAppointmentSerializer
 
 
 class AvailableSlotsView(generics.ListAPIView):
@@ -104,3 +104,47 @@ class MyScheduleView(generics.ListAPIView):
         return Appointment.objects.filter(
             slot__doctor=self.request.user
         ).exclude(status=Appointment.Status.CANCELLED)
+    
+class RescheduleAppointmentView(APIView):
+    permission_classes = [permissions.IsAuthenticated]
+
+    def patch(self, request, pk):
+        try:
+            appointment = Appointment.objects.get(pk=pk, patient=request.user)
+        except Appointment.DoesNotExist:
+            return Response(
+                {"detail": "Appointment not found."}, status=status.HTTP_404_NOT_FOUND
+            )
+
+        if appointment.status != Appointment.Status.BOOKED:
+            return Response(
+                {"detail": "Cancelled appointments cannot be rescheduled."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        serializer = RescheduleAppointmentSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        new_slot_id = serializer.validated_data["new_slot_id"]
+
+        with transaction.atomic():
+            try:
+                new_slot = Slot.objects.select_for_update().get(
+                    id=new_slot_id, is_booked=False
+                )
+            except Slot.DoesNotExist:
+                return Response(
+                    {"detail": "The new slot is no longer available."},
+                    status=status.HTTP_409_CONFLICT,
+                )
+
+            old_slot = appointment.slot
+            old_slot.is_booked = False
+            old_slot.save()
+
+            new_slot.is_booked = True
+            new_slot.save()
+
+            appointment.slot = new_slot
+            appointment.save()
+
+        return Response(AppointmentSerializer(appointment).data, status=status.HTTP_200_OK)
